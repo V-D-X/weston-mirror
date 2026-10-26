@@ -1363,6 +1363,25 @@ rdp_rail_create_cursor(struct weston_surface *surface)
 	return 0;
 }
 
+/* Converts a wl_pointer hotspot, given in logical pixels, to pixels of the
+ * cursor bitmap sent to the RDP client (Windows). The bitmap is scaled
+ * from the surface by the app's buffer scale and Windows' display scaling,
+ * so the hotspot has to be scaled by the same ratio or Windows draws the
+ * cursor offset from where clicks land. */
+static uint32_t
+rdp_rail_scale_cursor_hotspot(int32_t hotspot, int32_t surface_size,
+			      uint32_t client_size)
+{
+	int64_t scaled;
+
+	if (hotspot <= 0 || surface_size <= 0 || client_size == 0)
+		return 0;
+
+	scaled = (int64_t)hotspot * client_size;
+	scaled = (scaled + surface_size / 2) / surface_size;
+	return MIN(scaled, (int64_t)client_size - 1);
+}
+
 static int
 rdp_rail_update_cursor(struct weston_surface *surface)
 {
@@ -1424,6 +1443,8 @@ rdp_rail_update_cursor(struct weston_surface *surface)
 		int cursorBpp = 4; /* Bytes Per Pixel. */
 		int pointerBitsSize = newClientPos.width * cursorBpp*newClientPos.height;
 		BYTE *pointerBits = xmalloc(pointerBitsSize);
+		int32_t hotspot_x = pointer ? pointer->hotspot_x : 0;
+		int32_t hotspot_y = pointer ? pointer->hotspot_y : 0;
 
 		/* client expects y-flip image for cursor */
 		if (weston_surface_copy_content(surface,
@@ -1443,8 +1464,14 @@ rdp_rail_update_cursor(struct weston_surface *surface)
 
 		pointerUpdate.xorBpp = cursorBpp * 8; /* Bits Per Pixel. */
 		pointerUpdate.cacheIndex = 0;
-		pointerUpdate.hotSpotX = pointer ? pointer->hotspot_x : 0;
-		pointerUpdate.hotSpotY = pointer ? pointer->hotspot_y : 0;
+		pointerUpdate.hotSpotX =
+			rdp_rail_scale_cursor_hotspot(hotspot_x,
+						      surface->width,
+						      newClientPos.width);
+		pointerUpdate.hotSpotY =
+			rdp_rail_scale_cursor_hotspot(hotspot_y,
+						      surface->height,
+						      newClientPos.height);
 		pointerUpdate.width = newClientPos.width;
 		pointerUpdate.height = newClientPos.height;
 		pointerUpdate.lengthAndMask = 0;
